@@ -1,18 +1,20 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { FamilyMember } from '../types';
-import * as htmlToImage from 'https://esm.sh/html-to-image';
+import * as htmlToImage from 'html-to-image';
 
 interface MemberNodeProps {
   member: FamilyMember;
   isAdmin: boolean;
+  highlightedId: string | null;
   onEdit?: (member: FamilyMember) => void;
   onAddChild?: (parent: FamilyMember) => void;
 }
 
-const MemberNode: React.FC<MemberNodeProps> = ({ member, isAdmin, onEdit, onAddChild }) => {
+const MemberNode: React.FC<MemberNodeProps> = ({ member, isAdmin, highlightedId, onEdit, onAddChild }) => {
   const [isExpanded, setIsExpanded] = useState(true);
   const hasChildren = member.children && member.children.length > 0;
+  const isHighlighted = highlightedId === member.id;
 
   const toggleExpand = () => setIsExpanded(!isExpanded);
 
@@ -27,7 +29,7 @@ const MemberNode: React.FC<MemberNodeProps> = ({ member, isAdmin, onEdit, onAddC
   };
 
   return (
-    <div className="flex flex-col items-center">
+    <div className="flex flex-col items-center" id={`member-${member.id}`}>
       <div className="relative flex flex-col items-center">
         {/* Đường nối lên cha - Dài 20px, căn tâm tuyệt đối */}
         {member.generation > 1 && (
@@ -39,7 +41,8 @@ const MemberNode: React.FC<MemberNodeProps> = ({ member, isAdmin, onEdit, onAddC
 
         {/* Khối thông tin thành viên */}
         <div className={`
-          relative z-10 transition-all duration-300 transform hover:-translate-y-1 shadow-md hover:shadow-xl group
+          relative z-10 transition-all duration-500 transform shadow-md group
+          ${isHighlighted ? 'scale-110 ring-4 ring-yellow-400 ring-offset-4 ring-offset-[#fdf6e3] z-40' : 'hover:-translate-y-1 hover:shadow-xl'}
           ${isCompact 
             ? 'min-w-[40px] px-2 py-3 rounded-lg border-[1px] bg-white hover:border-red-600' 
             : 'w-44 p-4 rounded-2xl border-[3px] bg-white shadow-sm'
@@ -49,6 +52,7 @@ const MemberNode: React.FC<MemberNodeProps> = ({ member, isAdmin, onEdit, onAddC
             : 'border-pink-200'
           }
           ${isGen1To2 ? 'ring-2 ring-red-900/10 ring-offset-2 border-red-900 bg-red-50' : ''}
+          ${isHighlighted ? 'border-yellow-500 !bg-yellow-50 shadow-[0_0_20px_rgba(234,179,8,0.5)]' : ''}
         `}>
           {isAdmin && (
             <button 
@@ -135,7 +139,13 @@ const MemberNode: React.FC<MemberNodeProps> = ({ member, isAdmin, onEdit, onAddC
                      
                      {/* 3. Container chứa MemberNode: Cần pt-10 để tạo khoảng trống cho đường lên 20px + đường xuống 20px */}
                      <div className="pt-10">
-                        <MemberNode member={child} isAdmin={isAdmin} onEdit={onEdit} onAddChild={onAddChild} />
+                        <MemberNode 
+                          member={child} 
+                          isAdmin={isAdmin} 
+                          highlightedId={highlightedId}
+                          onEdit={onEdit} 
+                          onAddChild={onAddChild} 
+                        />
                      </div>
                   </div>
                 );
@@ -157,6 +167,9 @@ interface FamilyTreeProps {
 const FamilyTree: React.FC<FamilyTreeProps> = ({ root, isAdmin, onEditMember, onAddChild }) => {
   const [scale, setScale] = useState(0.85);
   const [showControls, setShowControls] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  
   const containerRef = useRef<HTMLDivElement>(null);
   const treeRef = useRef<HTMLDivElement>(null);
   
@@ -167,9 +180,55 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ root, isAdmin, onEditMember, on
   const [scrollTop, setScrollTop] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
 
+  // Flatten tree for search
+  const flatMembers = useMemo(() => {
+    const list: FamilyMember[] = [];
+    const traverse = (node: FamilyMember) => {
+      list.push(node);
+      if (node.children) node.children.forEach(traverse);
+    };
+    traverse(root);
+    return list;
+  }, [root]);
+
+  // Filter search results
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim() || searchQuery.length < 2) return [];
+    return flatMembers.filter(m => 
+      m.name.toLowerCase().includes(searchQuery.toLowerCase())
+    ).slice(0, 5); // Limit results for UI
+  }, [searchQuery, flatMembers]);
+
   const handleZoomIn = () => setScale(prev => Math.min(prev + 0.1, 1.5));
   const handleZoomOut = () => setScale(prev => Math.max(prev - 0.1, 0.2));
   const handleResetZoom = () => setScale(0.85);
+
+  const handleSelectMember = (member: FamilyMember) => {
+    setHighlightedId(member.id);
+    setSearchQuery('');
+    
+    // Smooth scroll to member
+    setTimeout(() => {
+      const element = document.getElementById(`member-${member.id}`);
+      if (element && containerRef.current && treeRef.current) {
+        const rect = element.getBoundingClientRect();
+        const containerRect = containerRef.current.getBoundingClientRect();
+        
+        // Calculate target scroll position to center the element
+        const relativeX = rect.left - containerRect.left + containerRef.current.scrollLeft;
+        const relativeY = rect.top - containerRect.top + containerRef.current.scrollTop;
+        
+        containerRef.current.scrollTo({
+          left: relativeX - containerRect.width / 2 + rect.width / 2,
+          top: relativeY - containerRect.height / 2 + rect.height / 2,
+          behavior: 'smooth'
+        });
+      }
+    }, 100);
+
+    // Clear highlight after some time
+    setTimeout(() => setHighlightedId(null), 5000);
+  };
 
   const handleExportPNG = async () => {
     if (!treeRef.current) return;
@@ -192,6 +251,9 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ root, isAdmin, onEditMember, on
   };
 
   const onMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return; // Left click only
+    if ((e.target as HTMLElement).closest('.search-container')) return;
+    
     if (!containerRef.current) return;
     setIsDragging(true);
     setStartX(e.pageX - containerRef.current.offsetLeft);
@@ -213,13 +275,52 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ root, isAdmin, onEditMember, on
   return (
     <div className="relative w-full overflow-hidden bg-[#fdf6e3]/80 backdrop-blur-sm rounded-3xl border border-red-900/10 shadow-inner min-h-[700px] h-[80vh]">
       
+      {/* Floating Controls Overlay */}
       <div className={`absolute top-4 right-4 z-[60] flex flex-col items-end gap-2 transition-all duration-300 ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
+        
+        {/* Search Container */}
+        <div className="search-container relative w-64 md:w-80">
+          <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-red-900/10 flex items-center px-4 py-2 focus-within:ring-2 ring-red-900/20 transition-all">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input 
+              type="text" 
+              placeholder="Tìm kiếm thành viên..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="bg-transparent border-none outline-none w-full text-sm font-bold text-red-950 placeholder:text-gray-300 placeholder:italic"
+            />
+          </div>
+
+          {/* Search Results Dropdown */}
+          {searchResults.length > 0 && (
+            <div className="absolute top-full mt-2 left-0 right-0 bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-red-900/10 overflow-hidden animate-fadeIn z-[70]">
+              {searchResults.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => handleSelectMember(m)}
+                  className="w-full px-4 py-3 text-left hover:bg-red-50 transition-colors flex items-center justify-between border-b last:border-0 border-gray-100"
+                >
+                  <div className="flex flex-col">
+                    <span className="font-bold text-red-950 text-sm">{m.name}</span>
+                    <span className="text-[10px] text-gray-400 uppercase font-black">Đời {m.generation} {m.parentName ? `• Con của ${m.parentName}` : ''}</span>
+                  </div>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-red-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <button 
           onClick={() => setShowControls(!showControls)}
           className={`w-10 h-10 rounded-full shadow-2xl flex items-center justify-center transition-all ${showControls ? 'bg-red-900 text-white rotate-90' : 'bg-white text-red-900 hover:bg-red-50'}`}
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066-1.543.94-3.31-.826-2.37-2.37-1.724 1.724 0 00-1.065-2.572-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
         </button>
@@ -265,6 +366,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ root, isAdmin, onEditMember, on
             <MemberNode 
               member={root} 
               isAdmin={isAdmin} 
+              highlightedId={highlightedId}
               onEdit={onEditMember} 
               onAddChild={onAddChild} 
             />
