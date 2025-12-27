@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { AppSection } from '../types';
+import { AppSection } from '../types.ts';
 
 interface NavigationProps {
   activeSection: AppSection;

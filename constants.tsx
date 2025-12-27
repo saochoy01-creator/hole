@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { FamilyMember, NewsItem } from './types';
+import { FamilyMember, NewsItem } from './types.ts';
 
 export const CLAN_NAME = "GIA TỘC HỌ LÊ";
 export const CLAN_ADDRESS = "Tiến Thịnh - Mê Linh - Hà Nội";
